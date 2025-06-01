@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebRTC 2-Person Video Chat Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    #videos {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    video {
+      max-width: 100%;
+    }
+    #start {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="videos">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+  </div>
+  <div id="start">
+    <label for="roomId">Room ID: </label>
+    <input type="text" id="roomId" placeholder="Room ID" readonly />
+    <input type="text" id="userId" placeholder="User ID" value="web-user" />
+    <button id="startButton">Start</button>
+  </div>
+  <script>
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const roomIdInput = document.getElementById('roomId');
+    const userIdInput = document.getElementById('userId');
+    const startButton = document.getElementById('startButton');
+    const signalingUrl = 'wss://localhost:9081';
+    
+    // Generate 4-digit random room ID
+    function generateUniqueId() {
+      return Math.floor(1000 + Math.random() * 9000).toString();
+    }
+    
+    // Set room ID on page load
+    roomIdInput.value = generateUniqueId();
+
+    startButton.onclick = function() {
+      const roomId = roomIdInput.value;
+      if (!roomId) {
+        alert('Please enter a room ID');
+        return;
+      }
+      startButton.disabled = true;
+      roomIdInput.disabled = true;
+
+      // Create WebSocket connection
+      const socket = new WebSocket(signalingUrl);
+
+      socket.onmessage = function(event) {
+        let msg;
+        try {
+          msg = JSON.parse(event.data);
+        } catch (e) {
+          console.error('Failed to parse message data as JSON', e);
+          return;
+        }
+
+        switch (msg.type) {
+          case 'created':
+            console.log('Created room', msg.data.room);
+            setupWebRTC(msg.data.isInitiator).then(createOffer);
+            break;
+          case 'joined':
+            console.log('Joined room', msg.data.room);
+            setupWebRTC(msg.data.isInitiator).then(createOffer);
+            break;
+          case 'ready':
+            console.log('Ready to create offer');
+            // Get the other user's ID from the ready message
+            if (msg.data && msg.data.userId) {
+              console.log(`Other user ID: ${msg.data.userId}`);
+            }
+            // Slightly delay creating offer to ensure both parties are ready
+            setTimeout(createOffer, 500);
+            break;
+          case 'full':
+            console.log('Room is full:', msg.data.room);
+            break;
+          case 'message':
+            handleSignalingMessage(msg.data.message);
+            break;
+          default:
+            console.error('Unknown message type:', msg.type);
+        }
+      };
+
+      socket.onopen = function() {
+        console.log('WebSocket connected');
+        joinOrCreateRoom();
+      };
+
+      function joinOrCreateRoom() {
+        // Add user ID to the join message
+        const userId = userIdInput.value || ('web-' + Math.random().toString(36).substr(2, 9));
+        socket.send(JSON.stringify({ 
+          type: 'join', 
+          data: { 
+            room: roomId,
+            userId: userId 
+          }
+        }));
+      }
+
+      let pc;
+      const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+      function setupWebRTC(isInitiator) {
+        return new Promise(function(resolve, reject) {
+          pc = new RTCPeerConnection(configuration);
+
+          // Triggered when the local ICE agent's state changes
+          pc.onicecandidate = function(event) {
+            // Send all types of candidates, not just host types
+            if (event.candidate) {
+              console.log(`Sending ICE candidate: ${JSON.stringify(event.candidate)}`);
+              sendSignalingMessage({ 
+                type: 'candidate', 
+                candidate: event.candidate,
+                userId: userIdInput.value // Add user ID
+              });
+            }
+          };
+
+          // Triggered when a remote media stream is added to the connection
+          pc.ontrack = function(event) {
+            console.log("ontrack: " + JSON.stringify(event.streams[0]));
+            if (remoteVideo.srcObject) {
+               console.log("remoteVideo.srcObject is not null, discard");
+            }
+            remoteVideo.srcObject = event.streams[0];
+          };
+
+          // Get local media stream
+          navigator.mediaDevices
+            .getUserMedia({ video: true, audio: true })
+            .then(function(stream) {
+              localVideo.srcObject = stream;
+              console.log("Adding local tracks to peer connection");
+              stream.getTracks().forEach(track => pc.addTrack(track, stream));
+              resolve();
+            })
+            .catch(function(error) {
+              console.error('Error accessing media devices.', error);
+              reject(error);
+            });
+        });
+      }
+
+      function createOffer() {
+        pc.createOffer()
+          .then(function(offer) {
+            console.log("Creating offer");
+            return pc.setLocalDescription(offer);
+          })
+          .then(function() {
+            // Ensure user ID is included
+            sendSignalingMessage({ 
+              type: 'offer', 
+              sdp: pc.localDescription,
+              userId: userIdInput.value 
+            });
+          })
+          .catch(logError);
+      }
+
+      function createAnswer() {
+        console.log("Creating answer");
+        pc.createAnswer()
+          .then(function(answer) {
+            return pc.setLocalDescription(answer);
+          })
+          .then(function() {
+            // Ensure user ID is included
+            sendSignalingMessage({ 
+              type: 'answer', 
+              sdp: pc.localDescription,
+              userId: userIdInput.value 
+            });
+          })
+          .catch(logError);
+      }
+
+      function handleSignalingMessage(msg) {
+        console.log("HandleSignalingMessage: " + JSON.stringify(msg) );
+        switch (msg.type) {
+          case 'offer':
+            pc.setRemoteDescription(new RTCSessionDescription(msg.sdp))
+              .then(function() {
+                createAnswer();
+              })
+              .catch(logError);
+            break;
+          case 'answer':
+            console.log("SetRemoteDescription: " + JSON.stringify(msg.sdp));
+            pc.setRemoteDescription(new RTCSessionDescription(msg.sdp)).catch(logError);
+            break;
+          case 'candidate':
+            console.log("AddIceCandidate: " + JSON.stringify(msg.candidate));
+            pc.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(logError);
+            break;
+        }
+      }
+
+      function sendSignalingMessage(message) {
+        // Ensure each signaling message contains a user ID
+        if (!message.userId && userIdInput.value) {
+          message.userId = userIdInput.value;
+        }
+        
+        var msg = JSON.stringify({ type: 'message', data: { message: message } });
+        console.log("Sending signaling message: " + msg);
+        socket.send(msg);
+      }
+
+      function logError(error) {
+        console.error('Error:', error);
+      }
+    };
+  </script>
+</body>
+</html>

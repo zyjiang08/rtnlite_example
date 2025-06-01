@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "sha.h": "c",
+        "error.h": "c",
+        "ssl.h": "c",
+        "platform_util.h": "c"
+    }
+}
