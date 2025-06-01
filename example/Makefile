@@ -7,8 +7,8 @@ UTILITY_DIR := 3rd/utility
 OBJ_DIR := obj
 
 # 编译器和参数
-CC := gcc
-CFLAGS := -Wall -g -O2 -std=c99
+CC := clang
+CFLAGS := -Wall -g -O2
 
 # 包含路径
 INCLUDE := -I$(SDK_DIR)/include \

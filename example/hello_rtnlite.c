@@ -13,7 +13,7 @@
  #include <signal.h> // For signal handling
  #include <time.h>   // For basic timestamping
  #include <sys/time.h> // For gettimeofday
- 
+ #include <strings.h>
  #include "rtnlite_engine_api.h" // Our main API
  #include "pacer.h" // For controlling frame send rate
  #include "3rd/file_parser/include/file_parser.h" // For reading media files
@@ -143,10 +143,6 @@
     
     printf("捕获信号 %d. 正在退出...\n", sig);
     g_app_ctx.app_quit_flag = 1; // 使用1而不是true，因为它是sig_atomic_t类型
-    
-    // 同时检查WebSocket线程提供的全局退出标志
-    extern volatile sig_atomic_t g_quit_flag;
-    g_quit_flag = 1;
     
     // 如果连续两次收到信号，则强制退出
     signal_count++;
@@ -417,8 +413,8 @@ static void cleanup_media_sources(app_context_t* ctx) {
  static void app_on_remote_video_frame(rtnlite_connection_t connection, const char* user_id, const rtnlite_video_frame_t* frame, void* user_data) {
      static int count = 0;
      if (count % 100 == 0) { // Log every 100 frames
-         printf("APP_CB: Received video frame from user '%s': size=%zu, type=%d, ts=%llums\n",
-                user_id, frame->length, frame->frame_type, frame->render_time_ms);
+         printf("APP_CB: Received video frame from user '%s': size=%zu, type=%d, ts=%lums\n",
+               user_id, frame->length, frame->frame_type, (unsigned long)frame->render_time_ms);
      }
      count++;
      (void)connection;
@@ -428,8 +424,8 @@ static void cleanup_media_sources(app_context_t* ctx) {
  static void app_on_remote_audio_frame(rtnlite_connection_t connection, const char* user_id, const rtnlite_audio_frame_t* frame, void* user_data) {
      static int count = 0;
      if (count % 500 == 0) { // Log every 500 frames
-         printf("APP_CB: Received audio frame from user '%s': size=%zu, ts=%llums\n",
-                user_id, frame->length, frame->render_time_ms);
+         printf("APP_CB: Received audio frame from user '%s': size=%zu, ts=%lums\n",
+               user_id, frame->length, (unsigned long)frame->render_time_ms);
      }
      count++;
      (void)connection;
