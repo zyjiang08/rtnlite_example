@@ -157,8 +157,35 @@
               resolve();
             })
             .catch(function(error) {
-              console.error('Error accessing media devices.', error);
-              reject(error);
+              // 摄像头不可用时，仅建立接收端，不发送本地流
+              localVideo.poster = '';
+              localVideo.style.background = '#eee';
+              localVideo.style.display = 'none'; // 隐藏本地窗口
+              // UI提示
+              let tip = document.getElementById('noCamTip');
+              if (!tip) {
+                tip = document.createElement('div');
+                tip.id = 'noCamTip';
+                tip.style.position = 'fixed';
+                tip.style.top = '60px';
+                tip.style.left = '10px';
+                tip.style.background = '#fffae0';
+                tip.style.color = '#b00';
+                tip.style.padding = '8px 14px';
+                tip.style.borderRadius = '6px';
+                tip.style.zIndex = '1000';
+                tip.textContent = 'No camera detected. Receive-only mode.';
+                document.body.appendChild(tip);
+              }
+              console.warn('Camera not available, receive-only mode:', error);
+              // 不添加本地track，但添加recvonly transceiver，确保SDP正确
+              try {
+                pc.addTransceiver('audio', { direction: 'recvonly' });
+                pc.addTransceiver('video', { direction: 'recvonly' });
+              } catch (e) {
+                console.warn('addTransceiver not supported:', e);
+              }
+              resolve();
             });
         });
       }
